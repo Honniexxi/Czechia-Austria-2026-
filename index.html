@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#7f9172">
+  <meta name="description" content="Czechia and Austria 2026 offline travel journal">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Europe 2026">
+  <title>Europe 2026 · Travel Journal</title>
+  <link rel="manifest" href="./manifest.json">
+  <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./icons/icon-192.png">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">跳至主要內容</a>
+  <div class="paper-grain" aria-hidden="true"></div>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="#today" aria-label="回到今日行程">
+        <span class="brand-mark" aria-hidden="true">✦</span>
+        <span><small>THE EUROPEAN</small><strong>Travel Journal</strong></span>
+      </a>
+      <button class="sync-button" id="sync-button" type="button" aria-label="重新同步資料">
+        <span class="sync-dot" aria-hidden="true"></span>
+        <span id="sync-label">Loading</span>
+      </button>
+    </header>
+
+    <main id="main-content" tabindex="-1">
+      <section class="view is-active" id="view-today" data-view="today" aria-labelledby="today-title">
+        <div class="today-hero">
+          <div>
+            <p class="eyebrow" id="trip-name">EUROPE 2026</p>
+            <h1 id="today-title"><span id="day-number">DAY —</span><span id="today-date">Loading…</span></h1>
+            <p class="place-line" id="today-place">Preparing your journey</p>
+          </div>
+          <div class="postmark" aria-hidden="true"><span>2026</span><b>EUROPE</b><small>BON VOYAGE</small></div>
+        </div>
+
+        <section class="weather-card" aria-label="天氣資訊">
+          <div class="weather-icon" aria-hidden="true">☁</div>
+          <div><strong id="weather-temp">Forecast unavailable</strong><span id="weather-copy">尚無預報</span></div>
+          <small id="weather-updated">No cached forecast</small>
+        </section>
+
+        <div class="day-selector" id="day-selector" role="tablist" aria-label="選擇旅程日期"></div>
+
+        <div class="section-heading timeline-heading">
+          <div><p class="eyebrow">TODAY'S ROUTE</p><h2>Your day, at a glance</h2></div>
+          <span class="hand-note" id="day-summary"></span>
+        </div>
+        <div class="timeline" id="timeline" aria-live="polite"></div>
+      </section>
+
+      <section class="view" id="view-journey" data-view="journey" aria-labelledby="journey-title" hidden>
+        <div class="page-intro journey-intro">
+          <p class="eyebrow">THE FULL STORY</p>
+          <h1 id="journey-title">My Journey</h1>
+          <p id="journey-range"></p>
+          <div class="stat-strip" id="journey-stats"></div>
+        </div>
+        <div id="journey-list"></div>
+      </section>
+
+      <section class="view" id="view-tools" data-view="tools" aria-labelledby="tools-title" hidden>
+        <div class="page-intro">
+          <p class="eyebrow">POCKET COMPANIONS</p>
+          <h1 id="tools-title">Travel Tools</h1>
+          <p>行前準備、票券、匯率與旅途中臨時記下的事。</p>
+        </div>
+        <div class="tool-tabs" role="tablist" aria-label="旅行工具">
+          <button type="button" role="tab" aria-selected="true" data-tool="checklist"><span>✓</span>Checklist</button>
+          <button type="button" role="tab" aria-selected="false" data-tool="currency"><span>€</span>Currency</button>
+          <button type="button" role="tab" aria-selected="false" data-tool="bookings"><span>🎟</span>Bookings</button>
+          <button type="button" role="tab" aria-selected="false" data-tool="notes"><span>✎</span>Quick Notes</button>
+        </div>
+        <div class="tool-panel is-active" id="tool-checklist" data-tool-panel="checklist"></div>
+        <div class="tool-panel" id="tool-currency" data-tool-panel="currency" hidden>
+          <div class="journal-card currency-card">
+            <div class="card-heading"><div><p class="eyebrow">QUICK CONVERTER</p><h2>Currency</h2></div><span id="rate-status">Unavailable</span></div>
+            <div class="currency-row"><label for="currency-amount">Amount</label><input id="currency-amount" inputmode="decimal" value="100" autocomplete="off"></div>
+            <div class="currency-selects">
+              <label>From<select id="currency-from"><option>CZK</option><option>EUR</option><option>TWD</option></select></label>
+              <button id="currency-swap" type="button" aria-label="交換幣別">⇄</button>
+              <label>To<select id="currency-to"><option>TWD</option><option>EUR</option><option>CZK</option></select></label>
+            </div>
+            <output id="currency-result" for="currency-amount currency-from currency-to">Waiting for rates</output>
+            <p class="quiet-note">匯率只在成功取得後使用；離線時顯示最後更新資料，不提供推測值。</p>
+          </div>
+        </div>
+        <div class="tool-panel" id="tool-bookings" data-tool-panel="bookings" hidden></div>
+        <div class="tool-panel" id="tool-notes" data-tool-panel="notes" hidden>
+          <form class="note-form" id="note-form">
+            <label for="note-input">New note</label>
+            <div><input id="note-input" maxlength="240" placeholder="例如：明天退房前拿寄放行李"><button type="submit">Add note</button></div>
+          </form>
+          <div class="notes-list" id="notes-list"></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-info" data-view="info" aria-labelledby="info-title" hidden>
+        <div class="page-intro">
+          <p class="eyebrow">KEEP IT CLOSE</p>
+          <h1 id="info-title">Trip Info</h1>
+          <p>需要時能馬上找到的住宿、已預約交通與固定資訊。</p>
+        </div>
+        <div id="info-content"></div>
+      </section>
+
+      <section class="fatal-state" id="fatal-state" hidden aria-live="assertive">
+        <span aria-hidden="true">☂</span><h1>Journey data unavailable</h1>
+        <p id="fatal-message">首次載入需要網路連線。</p>
+        <button type="button" id="retry-button">Try again</button>
+      </section>
+    </main>
+
+    <nav class="bottom-nav" aria-label="主要導覽">
+      <button class="is-active" type="button" data-route="today" aria-current="page"><span aria-hidden="true">⌖</span><b>Today</b></button>
+      <button type="button" data-route="journey"><span aria-hidden="true">⌁</span><b>Journey</b></button>
+      <button type="button" data-route="tools"><span aria-hidden="true">✦</span><b>Tools</b></button>
+      <button type="button" data-route="info"><span aria-hidden="true">i</span><b>Info</b></button>
+    </nav>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
