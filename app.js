@@ -154,7 +154,8 @@ function renderToday() {
   $('#trip-name').textContent = state.data.config.TripName || 'Europe 2026';
   $('#day-number').textContent = `DAY ${state.selectedDay ?? '—'}`;
   $('#today-date').textContent = date ? formatDate(date, { weekday: 'long', month: 'long', day: 'numeric' }) : 'Date unavailable';
-  $('#today-place').textContent = trip ? `${trip.City} · ${trip.Country}` : 'Journey day';
+  const place = trip ? [trip.City, trip.Country].filter(Boolean).join(' · ') : '';
+  $('#today-place').textContent = place || 'Details to be added';
   $('#day-summary').textContent = trip?.Summary || '';
   renderDaySelector();
   const items = state.data.itinerary.map((row, index) => ({ ...row, _index: index })).filter(row => Number(row.Day) === state.selectedDay).sort((a, b) => {
@@ -187,14 +188,14 @@ function renderJourney() {
   const trip = state.data.trip.slice().sort((a, b) => Number(a.Day) - Number(b.Day));
   if (!trip.length) return;
   $('#journey-range').textContent = `${formatDate(trip[0].Date, { day: '2-digit', month: 'long' })} — ${formatDate(trip.at(-1).Date, { day: '2-digit', month: 'long', year: 'numeric' })}`;
-  const countries = new Set(trip.map(row => row.CountryCode)); const cities = new Set(trip.map(row => row.City));
+  const countries = new Set(trip.map(row => row.CountryCode).filter(Boolean)); const cities = new Set(trip.map(row => row.City).filter(Boolean));
   $('#journey-stats').replaceChildren(element('span', { text: `${trip.length} DAYS` }), element('span', { text: `${countries.size} COUNTRIES` }), element('span', { text: `${cities.size} CITIES` }));
   const list = $('#journey-list'); list.replaceChildren();
   const groups = new Map();
-  for (const row of trip) { const key = `${row.CountryCode}|${row.Country}`; if (!groups.has(key)) groups.set(key, []); groups.get(key).push(row); }
+  for (const row of trip) { const key = row.CountryCode || row.Country ? `${row.CountryCode}|${row.Country}` : `PLAN|To be planned`; if (!groups.has(key)) groups.set(key, []); groups.get(key).push(row); }
   for (const [key, rows] of groups) {
     const [code, country] = key.split('|');
-    const block = element('section', { class: 'country-block' }, [element('div', { class: 'country-title' }, [element('span', { text: countryFlags[code] || '◉' }), element('h2', { text: country })])]);
+    const block = element('section', { class: 'country-block' }, [element('div', { class: 'country-title' }, [element('span', { text: countryFlags[code] || (code === 'PLAN' ? '🗓' : '◉') }), element('h2', { text: country })])]);
     rows.forEach(row => block.append(element('button', { type: 'button', class: 'journey-day', onClick: () => { setDay(Number(row.Day)); setRoute('today'); } }, [
       element('span', { class: 'journey-date', text: `${formatDate(row.Date, { month: 'short' }).toUpperCase()}\n${formatDate(row.Date, { day: '2-digit' })}` }),
       element('span', {}, [element('strong', { text: `Day ${row.Day} · ${row.City}` }), element('p', { text: row.Summary || row.Note || 'Journey day' })]), element('span', { class: 'journey-arrow', text: '→', 'aria-hidden': 'true' })
@@ -261,8 +262,22 @@ async function initialize({ force = false } = {}) {
     const result = await loadTrip({ force }); state.data = result.data; state.updatedAt = result.updatedAt; state.source = result.source; state.selectedDay = dayFromLocation(); renderAll(); routeFromHash(); setSyncStatus(result.source, result.updatedAt, Boolean(result.error));
     refreshRates().then(() => renderCurrency()).catch(() => renderCurrency());
     if (result.error) showToast('Using the last valid journey data');
+    if (result.refreshAvailable && !force) refreshTripInBackground();
   } catch {
     setSyncStatus('error', null, true); $('#fatal-state').hidden = false; $('#fatal-message').textContent = navigator.onLine ? '資料格式不正確或暫時無法讀取，請稍後重試。' : '首次載入需要網路連線。';
+  }
+}
+
+async function refreshTripInBackground() {
+  try {
+    const result = await loadTrip({ force: true });
+    state.data = result.data; state.updatedAt = result.updatedAt; state.source = result.source;
+    if (!getAvailableDays().includes(state.selectedDay)) state.selectedDay = dayFromLocation();
+    renderAll(); routeFromHash(); setSyncStatus(result.source, result.updatedAt, Boolean(result.error));
+    if (result.source === 'network') showToast('Journey updated from Google Sheet');
+  } catch {
+    setSyncStatus('stale-cache', state.updatedAt, true);
+    showToast('Could not refresh · showing saved journey');
   }
 }
 

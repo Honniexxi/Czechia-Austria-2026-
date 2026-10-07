@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'europe-2026-shell-v1';
+const CACHE_VERSION = 'europe-2026-shell-v4';
 const APP_SHELL = [
   './', './index.html', './styles.css', './app.js', './api.js', './fixture.js', './storage.js', './data-services.js',
   './manifest.json', './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png'
