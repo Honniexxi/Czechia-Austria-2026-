@@ -29,6 +29,12 @@
       </button>
     </header>
 
+    <aside class="update-banner" id="update-banner" hidden aria-live="polite">
+      <span aria-hidden="true">✦</span>
+      <p><strong>新版旅行手帳已準備好</strong><small>更新只需要一下下，離線資料會繼續保留。</small></p>
+      <button type="button" id="update-button">立即更新</button>
+    </aside>
+
     <main id="main-content" tabindex="-1">
       <section class="view is-active" id="view-today" data-view="today" aria-labelledby="today-title">
         <div class="today-hero">
@@ -44,6 +50,7 @@
           <div class="weather-icon" aria-hidden="true">☁</div>
           <div><strong id="weather-temp">Forecast unavailable</strong><span id="weather-copy">尚無預報</span></div>
           <small id="weather-updated">No cached forecast</small>
+          <p class="weather-tip" id="weather-tip">替今天留一點空白，照自己的步調旅行。</p>
         </section>
 
         <div class="day-selector" id="day-selector" role="tablist" aria-label="選擇旅程日期"></div>

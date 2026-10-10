@@ -43,11 +43,20 @@ export async function getWeather({ city, countryCode, date, timezone }) {
     const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&countryCode=${encodeURIComponent(countryCode)}&count=1&language=en&format=json`;
     const geoResponse = await fetch(geoUrl); if (!geoResponse.ok) throw new Error('GEO_FAILED');
     const place = (await geoResponse.json()).results?.[0]; if (!place) throw new Error('CITY_NOT_FOUND');
-    const params = new URLSearchParams({ latitude: place.latitude, longitude: place.longitude, daily: 'weather_code,temperature_2m_max,temperature_2m_min', timezone: timezone || place.timezone || 'auto', forecast_days: '16' });
+    const params = new URLSearchParams({ latitude: place.latitude, longitude: place.longitude, daily: 'weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min,precipitation_probability_max,wind_speed_10m_max', timezone: timezone || place.timezone || 'auto', forecast_days: '16' });
     const weatherResponse = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`); if (!weatherResponse.ok) throw new Error('WEATHER_FAILED');
     const payload = await weatherResponse.json(); const index = payload.daily?.time?.indexOf(date); if (index < 0) return cached ? { ...cached, stale: true } : null;
     const [summary, icon] = weatherCode(payload.daily.weather_code[index]);
-    const result = { date, city, max: Math.round(payload.daily.temperature_2m_max[index]), min: Math.round(payload.daily.temperature_2m_min[index]), summary, icon, updatedAt: new Date().toISOString() };
+    const result = {
+      date, city,
+      max: Math.round(payload.daily.temperature_2m_max[index]),
+      min: Math.round(payload.daily.temperature_2m_min[index]),
+      apparentMax: Math.round(payload.daily.apparent_temperature_max[index]),
+      apparentMin: Math.round(payload.daily.apparent_temperature_min[index]),
+      precipitation: Math.round(payload.daily.precipitation_probability_max[index] || 0),
+      wind: Math.round(payload.daily.wind_speed_10m_max[index] || 0),
+      summary, icon, updatedAt: new Date().toISOString()
+    };
     storage.set(key, result); return result;
   } catch (error) {
     if (cached) return { ...cached, stale: true, error };

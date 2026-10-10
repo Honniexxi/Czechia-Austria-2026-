@@ -5,13 +5,26 @@ import { getWeather, refreshRates } from './data-services.js';
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const state = { data: null, selectedDay: null, route: 'today', tool: 'checklist', updatedAt: null, source: null };
-const iconMap = { Flight: '✈', Transport: '↝', Train: '🚆', Bus: '🚌', Hotel: '⌂', Attraction: '⌖', Food: '♨', Cafe: '☕', Activity: '✦', Concert: '♫', Restaurant: '♨', Other: '•' };
+const iconMap = { Flight: '✈', Transport: '↝', Train: '🚆', Bus: '🚌', Hotel: '⌂', Cafe: '☕', Concert: '♫', Other: '•' };
+const sketchedIcons = {
+  Food: '<circle cx="12" cy="12" r="5.6"/><path d="M4.5 3.5v6M3 3.5v3.8c0 1.3 3 1.3 3 0V3.5M4.5 9.5v11M18.3 3.5c-2.4 2-2.5 6.4-.2 7.7M18.1 11.2v9.3"/>',
+  Restaurant: '<circle cx="12" cy="12" r="5.6"/><path d="M4.5 3.5v6M3 3.5v3.8c0 1.3 3 1.3 3 0V3.5M4.5 9.5v11M18.3 3.5c-2.4 2-2.5 6.4-.2 7.7M18.1 11.2v9.3"/>',
+  Attraction: '<path d="M12 21s6-5.8 6-11a6 6 0 1 0-12 0c0 5.2 6 11 6 11Z"/><circle cx="12" cy="10" r="2.2"/>',
+  Activity: '<path d="M4 19c2.5-4 4.7-5.7 7-5.2 2.7.6 3.6-1.2 4.7-3.4M15.7 10.4l3.3 1.1-1-3.3M5 7.5c1.5-2.2 3.4-3.3 5.7-3.3"/><circle cx="5" cy="7.5" r="1.3"/>'
+};
 const countryFlags = { CZ: '🇨🇿', AT: '🇦🇹' };
+const categoryIcons = { document: '✉', documents: '✉', money: '◇', tech: '⚡', clothes: '♧', goods: '⌁', cosmetics: '✧', tickets: '🎟', packing: '♡' };
 const localDate = value => new Date(`${value}T12:00:00`);
 const formatDate = (value, options) => new Intl.DateTimeFormat('en-GB', options).format(localDate(value));
 const formatTime = iso => iso ? new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' }).format(new Date(iso)) : '';
 const text = value => String(value ?? '').trim();
 const normalizeTitle = value => text(value).toLocaleLowerCase().replace(/\s+/g, ' ');
+const bookingGroups = [
+  ['Stays', '住宿', ['Hotel']],
+  ['Transport', '交通', ['Flight', 'Train', 'Bus', 'Transport']],
+  ['Tickets', '票券與活動', ['Attraction', 'Activity', 'Concert']],
+  ['Other', '其他預訂', []]
+];
 
 function element(tag, attributes = {}, children = []) {
   const node = document.createElement(tag);
@@ -23,6 +36,82 @@ function element(tag, attributes = {}, children = []) {
   }
   for (const child of Array.isArray(children) ? children : [children]) if (child) node.append(child);
   return node;
+}
+
+function typeIcon(type) {
+  const icon = element('span', { class: `type-icon type-${text(type).toLowerCase()}`, 'aria-hidden': 'true' });
+  if (sketchedIcons[type]) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('focusable', 'false');
+    svg.innerHTML = sketchedIcons[type];
+    icon.append(svg);
+  } else icon.textContent = iconMap[type] || iconMap.Other;
+  return icon;
+}
+
+function textWithTravelArrows(value) {
+  const fragment = document.createDocumentFragment();
+  text(value).split(/(→)/).forEach(part => fragment.append(part === '→' ? element('b', { class: 'travel-arrow', text: '→', 'aria-hidden': 'true' }) : document.createTextNode(part)));
+  return fragment;
+}
+
+function bookingNoteLines(value) {
+  return text(value)
+    .replace(/<br\s*\/?\s*>/gi, '\n')
+    .replace(/\\r?\\n/g, '\n')
+    .replace(/&#(?:10|x0*a);?/gi, '\n')
+    .split(/\r?\n|(?=\s*\d+[.)、]\s*)/)
+    .map(line => line.trim().replace(/^\d+[.)、]\s*/, ''))
+    .filter(Boolean);
+}
+
+function zonedNow(timezone) {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return { date: `${values.year}-${values.month}-${values.day}`, minutes: Number(values.hour) * 60 + Number(values.minute) };
+}
+
+function itineraryStatuses(date, items) {
+  const statuses = Array(items.length).fill('');
+  if (!date || !items.length) return statuses;
+  const now = zonedNow(state.data.config.Timezone || 'Europe/Prague');
+  if (date < now.date) return statuses.map((_, index) => items[index].Time ? 'ended' : '');
+  if (date > now.date) return statuses;
+  let nextAssigned = false;
+  items.forEach((item, index) => {
+    if (!item.Time) return;
+    const start = Number(item.Time.slice(0, 2)) * 60 + Number(item.Time.slice(3));
+    const nextTime = items.slice(index + 1).find(row => row.Time)?.Time;
+    const fallbackEnd = nextTime ? Number(nextTime.slice(0, 2)) * 60 + Number(nextTime.slice(3)) : start + 60;
+    const end = item.EndTime ? Number(item.EndTime.slice(0, 2)) * 60 + Number(item.EndTime.slice(3)) : fallbackEnd;
+    if (now.minutes >= end) statuses[index] = 'ended';
+    else if (now.minutes >= start) statuses[index] = 'active';
+    else if (!nextAssigned) { statuses[index] = 'next'; nextAssigned = true; }
+  });
+  if (statuses.includes('active')) statuses.forEach((status, index) => { if (status === 'next') statuses[index] = ''; });
+  return statuses;
+}
+
+function timelineStatusBadge(status) {
+  const labels = { next: '接下來', active: '進行中', ended: '已結束' };
+  return element('span', { class: `timeline-status${status ? ` is-${status}` : ''}`, text: labels[status] || '', hidden: status ? null : '' });
+}
+
+function refreshTimelineStatuses() {
+  if (!state.data || state.route !== 'today') return;
+  const trip = state.data.trip.find(row => Number(row.Day) === state.selectedDay);
+  const fallback = state.data.itinerary.find(row => Number(row.Day) === state.selectedDay);
+  const date = trip?.Date || fallback?.Date;
+  const items = state.data.itinerary.map((row, index) => ({ ...row, _index: index })).filter(row => Number(row.Day) === state.selectedDay).sort((a, b) => !a.Time && !b.Time ? a._index - b._index : !a.Time ? 1 : !b.Time ? -1 : a.Time.localeCompare(b.Time) || a._index - b._index);
+  const labels = { next: '接下來', active: '進行中', ended: '已結束' };
+  const statuses = itineraryStatuses(date, items);
+  $$('.timeline-status').forEach((badge, index) => {
+    const status = statuses[index] || '';
+    badge.className = `timeline-status${status ? ` is-${status}` : ''}`;
+    badge.textContent = labels[status] || '';
+    badge.hidden = !status;
+  });
 }
 
 function showToast(message) {
@@ -124,7 +213,7 @@ function renderDaySelector() {
   }
 }
 
-function timelineCard(item, index) {
+function timelineCard(item, index, status = '') {
   const detailsId = `details-${state.selectedDay}-${index}`;
   const details = element('div', { class: 'timeline-details', id: detailsId, hidden: '' });
   if (item.EndTime) details.append(element('p', {}, [element('span', { class: 'detail-label', text: 'Until' }), document.createTextNode(item.EndTime)]));
@@ -139,8 +228,8 @@ function timelineCard(item, index) {
   const booking = matchingBooking(item); const ticket = booking ? safeLink(booking.Link, bookingLabel(booking.Type)) : null; if (ticket) actions.append(ticket);
   if (actions.childElementCount) details.append(actions);
   const toggle = element('button', { type: 'button', class: 'timeline-toggle', 'aria-expanded': 'false', 'aria-controls': detailsId }, [
-    element('span', { class: 'type-icon', text: iconMap[item.Type] || iconMap.Other, 'aria-hidden': 'true' }),
-    element('span', {}, [element('strong', { text: item.Title || 'Untitled' }), item.Subtitle ? element('small', { text: item.Subtitle }) : null]),
+    typeIcon(item.Type),
+    element('span', {}, [element('span', { class: 'timeline-title-row' }, [element('strong', { text: item.Title || 'Untitled' }), timelineStatusBadge(status)]), item.Subtitle ? element('small', {}, textWithTravelArrows(item.Subtitle)) : null]),
     element('span', { class: 'chevron', text: '⌄', 'aria-hidden': 'true' })
   ]);
   toggle.addEventListener('click', () => { const open = toggle.getAttribute('aria-expanded') === 'true'; toggle.setAttribute('aria-expanded', String(!open)); details.hidden = open; });
@@ -164,8 +253,9 @@ function renderToday() {
     return a.Time.localeCompare(b.Time) || a._index - b._index;
   });
   const timeline = $('#timeline'); timeline.replaceChildren();
+  const statuses = itineraryStatuses(date, items);
   if (!items.length) timeline.append(element('div', { class: 'empty-state', text: 'No itinerary items for this day.' }));
-  else items.forEach((item, index) => timeline.append(timelineCard(item, index)));
+  else items.forEach((item, index) => timeline.append(timelineCard(item, index, statuses[index])));
   renderWeather(date, trip);
 }
 
@@ -175,13 +265,35 @@ async function renderWeather(date, trip) {
   $('#weather-copy').textContent = tooFar ? '尚未進入可預報日期' : '目前沒有可用的天氣資料';
   $('#weather-updated').textContent = 'No cached forecast';
   $('.weather-icon').textContent = '☁';
+  $('#weather-tip').textContent = warmTravelTip(trip, null);
   if (!date || !trip?.City || !trip?.CountryCode) return;
   const weather = await getWeather({ city: trip.City, countryCode: trip.CountryCode, date, timezone: state.data.config.Timezone });
   if (!weather || state.selectedDay !== Number(trip.Day)) return;
   $('#weather-temp').textContent = `${weather.max}° / ${weather.min}°`;
-  $('#weather-copy').textContent = weather.summary;
+  const weatherDetails = [weather.summary];
+  if (Number.isFinite(weather.precipitation)) weatherDetails.push(`降雨 ${weather.precipitation}%`);
+  if (Number.isFinite(weather.wind)) weatherDetails.push(`風速 ${weather.wind} km/h`);
+  $('#weather-copy').textContent = weatherDetails.join(' · ');
   $('#weather-updated').textContent = `${weather.stale ? 'Cached' : 'Updated'} ${formatTime(weather.updatedAt)}`;
   $('.weather-icon').textContent = weather.icon;
+  $('#weather-tip').textContent = warmTravelTip(trip, weather);
+}
+
+function warmTravelTip(trip, weather) {
+  const dailyItems = state.data.itinerary.filter(item => Number(item.Day) === Number(trip?.Day));
+  const isArrival = /arrival/i.test(text(trip?.Note)) || dailyItems.some(item => /抵達|arriv/i.test(`${item.Title} ${item.Subtitle}`));
+  if (!weather) return isArrival ? '今天剛到，先慢慢適應這裡的步調，別急著把行程走滿。' : '替今天留一點空白，照自己的步調旅行。';
+  const feelsMax = Number.isFinite(weather.apparentMax) ? weather.apparentMax : weather.max;
+  const rainy = weather.precipitation >= 50 || /rain|drizzle|thunder/i.test(weather.summary);
+  const windy = weather.wind >= 25;
+  if (rainy && windy) return feelsMax <= 15 ? '今天濕冷又有風，記得把大衣穿好，雨傘也要握穩一點。' : '今天可能有雨又有風，帶件防風外套，移動時慢慢走。';
+  if (rainy) return feelsMax <= 15 ? '今天有點冷又可能下雨，記得把大衣穿好，雨傘也放在順手的位置。' : isArrival ? '今天剛到，又遇上一點雨；把傘放在順手的位置，慢慢熟悉周圍。' : '今天可能有雨，帶把傘，也替室內行程留一點彈性。';
+  if (windy) return feelsMax <= 15 ? '今天風大又偏冷，穿好防風外套，過橋或湖邊時多留意腳步。' : '今天風比較大，帶件防風外套，帽子也要戴穩。';
+  if (/snow/i.test(weather.summary)) return '今天有機會遇見雪，注意保暖與濕滑路面，慢慢走就好。';
+  if (feelsMax <= 12) return isArrival ? '今天剛到又有點冷，記得把大衣穿好，讓身體慢慢適應這裡的氣溫。' : '今天有點冷，記得把大衣穿好，圍巾和熱飲也會很舒服。';
+  if (feelsMax <= 17) return isArrival ? '今天剛到，早晚偏涼；外套先別收起來，慢慢適應這裡的氣溫。' : '今天早晚偏涼，記得帶件外套，走累了就找杯熱飲暖一暖。';
+  if (/clear|partly/i.test(weather.summary)) return isArrival ? '今天剛到，天氣很舒服，慢慢適應這裡的環境。' : '今天的天氣很舒服，適合放慢腳步看看沿途的小風景。';
+  return isArrival ? '今天剛到，先慢慢適應這裡的環境，行程不用趕。' : '今天適合照自己的步調前進，也別忘了留時間休息。';
 }
 
 function renderJourney() {
@@ -198,7 +310,7 @@ function renderJourney() {
     const block = element('section', { class: 'country-block' }, [element('div', { class: 'country-title' }, [element('span', { text: countryFlags[code] || (code === 'PLAN' ? '🗓' : '◉') }), element('h2', { text: country })])]);
     rows.forEach(row => block.append(element('button', { type: 'button', class: 'journey-day', onClick: () => { setDay(Number(row.Day)); setRoute('today'); } }, [
       element('span', { class: 'journey-date', text: `${formatDate(row.Date, { month: 'short' }).toUpperCase()}\n${formatDate(row.Date, { day: '2-digit' })}` }),
-      element('span', {}, [element('strong', { text: `Day ${row.Day} · ${row.City}` }), element('p', { text: row.Summary || row.Note || 'Journey day' })]), element('span', { class: 'journey-arrow', text: '→', 'aria-hidden': 'true' })
+      element('span', {}, [element('strong', { text: `Day ${row.Day} · ${row.City}` }), element('p', {}, textWithTravelArrows(row.Summary || row.Note || 'Journey day'))]), element('span', { class: 'journey-arrow', text: '→', 'aria-hidden': 'true' })
     ])));
     list.append(block);
   }
@@ -213,20 +325,34 @@ function renderChecklist() {
   const heading = element('div', { class: 'journal-card' }, [element('div', { class: 'card-heading' }, [element('div', {}, [element('p', { class: 'eyebrow', text: 'READY TO GO' }), element('h2', { text: 'Checklist' })]), element('span', { text: `${count} / ${state.data.checklist.length}` })]), element('div', { class: 'check-progress' }, [element('i', { style: `width:${state.data.checklist.length ? count / state.data.checklist.length * 100 : 0}%` })])]); panel.append(heading);
   const groups = new Map(); for (const row of state.data.checklist) { if (!groups.has(row.Category)) groups.set(row.Category, []); groups.get(row.Category).push(row); }
   for (const [category, rows] of groups) {
-    const card = element('section', { class: 'journal-card' }, [element('h3', { text: category })]);
-    rows.forEach(row => { const key = checklistKey(row); const checkbox = element('input', { type: 'checkbox', checked: done[key] ? '' : null, 'aria-label': row.Item }); checkbox.checked = Boolean(done[key]); checkbox.addEventListener('change', () => { done[key] = checkbox.checked; storage.set('checklist', done); renderChecklist(); }); card.append(element('label', { class: 'check-item' }, [checkbox, element('span', {}, [element('strong', { text: row.Item }), row.Note ? element('small', { text: row.Note }) : null])])) }); panel.append(card);
+    const icon = categoryIcons[text(category).toLowerCase()] || '✦';
+    const card = element('section', { class: 'journal-card checklist-category' }, [element('h3', { class: 'checklist-category-title' }, [element('span', { class: 'category-sticker', text: icon, 'aria-hidden': 'true' }), document.createTextNode(category)])]);
+    rows.forEach(row => { const key = checklistKey(row); const checkbox = element('input', { type: 'checkbox', checked: done[key] ? '' : null, 'aria-label': row.Item }); checkbox.checked = Boolean(done[key]); checkbox.addEventListener('change', () => { done[key] = checkbox.checked; storage.set('checklist', done); renderChecklist(); }); card.append(element('label', { class: 'check-item' }, [checkbox, element('span', {}, [element('strong', { text: row.Item }), row.Note ? element('small', { text: row.Note }) : null])])) });
+    if (rows.every(row => done[checklistKey(row)])) card.append(element('p', { class: 'category-complete', text: '這一袋準備好了 ♡' }));
+    panel.append(card);
   }
 }
 
 function renderBookingCard(row) {
   const actions = element('div', { class: 'action-row' }); const link = safeLink(row.Link, bookingLabel(row.Type)); if (link) actions.append(link); if (row.Address) actions.append(safeLink(mapLink(row.Address), 'Navigate'));
-  return element('article', { class: 'journal-card booking-card' }, [element('span', { class: 'type-icon', text: iconMap[row.Type] || iconMap.Other, 'aria-hidden': 'true' }), element('div', { class: 'booking-meta', text: `${formatDate(row.Date, { month: 'short', day: '2-digit' }).toUpperCase()}${row.Time ? ` · ${row.Time}` : ''}` }), element('h3', { text: row.Title }), row.BookingInfo ? element('p', { text: row.BookingInfo }) : null, row.Note ? element('p', { class: 'quiet-note', text: row.Note }) : null, actions.childElementCount ? actions : null]);
+  const noteLines = bookingNoteLines(row.Note);
+  const noteList = noteLines.length ? element('div', { class: 'booking-notes' }, [element('span', { class: 'detail-label', text: 'Remember' }), element('ul', {}, noteLines.map(line => element('li', { text: line })))]) : null;
+  return element('article', { class: 'journal-card booking-card' }, [typeIcon(row.Type), element('div', { class: 'booking-meta', text: `${formatDate(row.Date, { month: 'short', day: '2-digit' }).toUpperCase()}${row.Time ? ` · ${row.Time}` : ''}` }), element('h3', { text: row.Title }), row.BookingInfo ? element('p', {}, textWithTravelArrows(row.BookingInfo)) : null, noteList, actions.childElementCount ? actions : null]);
 }
 
 function renderBookings() {
   const panel = $('#tool-bookings'); panel.replaceChildren();
   const rows = state.data.bookings.slice().sort((a, b) => a.Date.localeCompare(b.Date) || (!a.Time ? 1 : !b.Time ? -1 : a.Time.localeCompare(b.Time)));
-  if (!rows.length) panel.append(element('div', { class: 'empty-state', text: 'No bookings yet.' })); else rows.forEach(row => panel.append(renderBookingCard(row)));
+  if (!rows.length) { panel.append(element('div', { class: 'empty-state', text: 'No bookings yet.' })); return; }
+  const assigned = new Set();
+  bookingGroups.forEach(([key, label, types]) => {
+    const groupRows = key === 'Other' ? rows.filter(row => !assigned.has(row)) : rows.filter(row => types.includes(row.Type));
+    groupRows.forEach(row => assigned.add(row));
+    if (!groupRows.length) return;
+    const section = element('section', { class: 'booking-group', 'aria-label': label }, [element('div', { class: 'booking-group-title' }, [element('span', { text: key }), element('h2', { text: label }), element('i', { text: String(groupRows.length) })])]);
+    groupRows.forEach(row => section.append(renderBookingCard(row)));
+    panel.append(section);
+  });
 }
 
 function renderNotes() {
@@ -252,8 +378,11 @@ function renderAll() { renderToday(); renderJourney(); renderChecklist(); render
 
 function setSyncStatus(source, updatedAt, error = false) {
   const button = $('#sync-button'); button.classList.toggle('is-offline', source === 'stale-cache' || !navigator.onLine); button.classList.toggle('is-error', error);
-  const prefix = source === 'fixture' ? 'Preview data' : source === 'stale-cache' || !navigator.onLine ? 'Offline' : 'Online';
-  $('#sync-label').textContent = updatedAt ? `${prefix} · ${formatTime(updatedAt)}` : prefix;
+  const stamp = updatedAt ? new Intl.DateTimeFormat('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(updatedAt)) : '';
+  const offline = source === 'stale-cache' || !navigator.onLine;
+  const prefix = source === 'fixture' ? '預覽資料' : offline ? '離線資料' : source === 'cache' ? '已儲存' : error ? '同步失敗' : '已同步';
+  $('#sync-label').textContent = stamp ? `${prefix} · ${stamp}` : prefix;
+  button.setAttribute('aria-label', offline && stamp ? `目前離線，顯示 ${stamp} 儲存的資料；按此重新同步` : '重新同步資料');
 }
 
 async function initialize({ force = false } = {}) {
@@ -304,7 +433,37 @@ function renderCurrency() {
 
 async function registerServiceWorker() {
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    try { await navigator.serviceWorker.register('./sw.js', { scope: './' }); } catch { /* PWA 仍可在線使用 */ }
+    try {
+      let reloading = false;
+      let updateRequested = false;
+      let pendingWorker = null;
+      const hadController = Boolean(navigator.serviceWorker.controller);
+      const showUpdate = worker => {
+        pendingWorker = worker;
+        $('#update-banner').hidden = false;
+      };
+      $('#update-button').addEventListener('click', () => {
+        if (!pendingWorker) return;
+        updateRequested = true;
+        $('#update-button').disabled = true;
+        $('#update-button').textContent = '更新中…';
+        pendingWorker.postMessage({ type: 'SKIP_WAITING' });
+      });
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (reloading || (!hadController && !updateRequested)) return;
+        reloading = true;
+        location.reload();
+      });
+      const registration = await navigator.serviceWorker.register('./sw.js', { scope: './' });
+      if (registration.waiting) showUpdate(registration.waiting);
+      registration.addEventListener('updatefound', () => {
+        const worker = registration.installing;
+        worker?.addEventListener('statechange', () => {
+          if (worker.state === 'installed' && navigator.serviceWorker.controller) showUpdate(worker);
+        });
+      });
+      registration.update();
+    } catch { /* PWA 仍可在線使用 */ }
   }
 }
 
@@ -312,3 +471,4 @@ bindEvents();
 initialize();
 renderCurrency();
 registerServiceWorker();
+setInterval(refreshTimelineStatuses, 60000);
